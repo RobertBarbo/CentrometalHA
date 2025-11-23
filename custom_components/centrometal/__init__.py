@@ -12,24 +12,25 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CentrometalAPI
-from .const import DOMAIN, MQTT_BROKER, MQTT_PASS, MQTT_PORT, MQTT_USER
+from .const import DOMAIN, MQTT_BROKER, MQTT_PASS, MQTT_PORT, MQTT_USER, DEFAULT_INSTALL_ID
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Centrometal from a config entry."""
     email = entry.data["email"]
     password = entry.data["password"]
-    install_id = entry.data["install_id"]
+    install_id = entry.data.get("install_id", DEFAULT_INSTALL_ID)  # Default: 1844 (same for all)
+    device_id = entry.data.get("device_id", "AD53C83A")  # Fallback for existing configs
 
     # Create API instance
     api = CentrometalAPI(email, password, install_id)
 
     # Create MQTT client and coordinator
-    mqtt_client = CentrometalMQTTClient(hass, install_id)
+    mqtt_client = CentrometalMQTTClient(hass, install_id, device_id)
     coordinator = CentrometalDataUpdateCoordinator(hass, api, mqtt_client)
 
     # Start MQTT client
@@ -67,26 +68,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class CentrometalMQTTClient:
     """MQTT client for real-time boiler status updates."""
 
-    def __init__(self, hass: HomeAssistant, install_id: str):
+    def __init__(self, hass: HomeAssistant, install_id: str, device_id: str):
         """Initialize MQTT client."""
         self.hass = hass
         self.install_id = install_id
+        self.device_id = device_id
         self.client = None
         self.data = {}
         self._connected = False
 
-        # MQTT topics based on device ID from install_id
-        # For now, we'll use a placeholder - real implementation would
-        # need to map install_id to device_id
-        self.device_id = "AD53C83A"  # TODO: Get from API or config
-        self.topic_device_status = f"cm.inst.biotec.{self.device_id}"
+        # MQTT topics based on device ID
+        self.topic_device_status = f"cm/inst/biotec/{self.device_id}"
         self.topic_server_commands = f"cm/srv/biotec/{self.device_id}"
 
     def start(self):
         """Start MQTT client."""
         try:
-            self.client = mqtt.Client()
-            self.client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+            # paho-mqtt 2.x requires callback API version
+            self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+            self.client.username_pw_set(MQTT_USER, MQTT_PASS)
             self.client.on_connect = self._on_connect
             self.client.on_message = self._on_message
             self.client.on_disconnect = self._on_disconnect
@@ -107,11 +107,11 @@ class CentrometalMQTTClient:
     def _on_connect(self, client, userdata, flags, rc):
         """Handle MQTT connection."""
         if rc == 0:
-            _LOGGER.info("Connected to MQTT broker")
+            _LOGGER.info("Connected to MQTT broker successfully")
             self._connected = True
             # Subscribe to device status topic
-            client.subscribe(self.topic_device_status)
-            _LOGGER.info("Subscribed to topic: %s", self.topic_device_status)
+            result = client.subscribe(self.topic_device_status)
+            _LOGGER.info("Subscribed to topic: %s (result: %s)", self.topic_device_status, result)
         else:
             _LOGGER.error("Failed to connect to MQTT broker, return code %d", rc)
 
@@ -125,17 +125,19 @@ class CentrometalMQTTClient:
         """Handle incoming MQTT messages."""
         try:
             payload = json.loads(msg.payload.decode())
-            _LOGGER.debug("MQTT message received on %s: %s", msg.topic, payload)
+            _LOGGER.info("MQTT message received on %s with %d fields", msg.topic, len(payload))
+            _LOGGER.debug("MQTT payload: %s", payload)
 
             # Update data dictionary with new values
             self.data.update(payload)
+            _LOGGER.debug("Total data fields after update: %d", len(self.data))
 
             # Notify Home Assistant about data update
             self.hass.loop.call_soon_threadsafe(self._notify_update)
         except json.JSONDecodeError as err:
-            _LOGGER.error("Failed to decode MQTT message: %s", err)
+            _LOGGER.error("Failed to decode MQTT message: %s (payload: %s)", err, msg.payload)
         except Exception as err:
-            _LOGGER.error("Error processing MQTT message: %s", err)
+            _LOGGER.error("Error processing MQTT message: %s", err, exc_info=True)
 
     def _notify_update(self):
         """Notify coordinator about data update."""
