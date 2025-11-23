@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "CentrometalHA Setup",
+        "description": "Enter your Centrometal portal credentials",
+        "data": {
+          "email": "Email",
+          "password": "Password",
+          "install_id": "Installation ID"
+        }
+      }
+    },
+    "error": {
+      "auth": "Invalid email or password",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This installation is already configured"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "centrometal",
+  "name": "CentrometalHA",
+  "codeowners": ["@RobertBarbo"],
+  "config_flow": true,
+  "documentation": "https://github.com/RobertBarbo/CentrometalHA",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "requirements": ["aiohttp>=3.8.0", "paho-mqtt>=1.6.0"],
+  "version": "1.0.0"
+}
