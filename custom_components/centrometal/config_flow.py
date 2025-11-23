@@ -19,7 +19,8 @@ DATA_SCHEMA = vol.Schema({
 })
 
 
-class CentrometalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Centrometal."""
 
     VERSION = 1
