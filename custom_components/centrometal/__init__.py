@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import CentrometalAPI
-from .const import DOMAIN, MQTT_BROKER, MQTT_PASSWORD, MQTT_PORT, MQTT_USERNAME
+from .const import DOMAIN, MQTT_BROKER, MQTT_PASS, MQTT_PORT, MQTT_USER
 
 _LOGGER = logging.getLogger(__name__)
 
