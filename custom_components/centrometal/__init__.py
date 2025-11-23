@@ -16,7 +16,7 @@ from .const import DOMAIN, MQTT_BROKER, MQTT_PASS, MQTT_PORT, MQTT_USER, DEFAULT
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.SENSOR, Platform.SWITCH, Platform.NUMBER]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -166,8 +166,10 @@ class CentrometalDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _handle_mqtt_update(self):
         """Handle MQTT data update."""
-        # Trigger coordinator update when MQTT data arrives
-        self.async_set_updated_data(self.mqtt_client.data)
+        # Merge MQTT data with existing coordinator data (preserves PVAL values)
+        combined_data = dict(self.data) if self.data else {}
+        combined_data.update(self.mqtt_client.data)
+        self.async_set_updated_data(combined_data)
 
     async def _async_update_data(self):
         """Fetch data from API."""
@@ -175,14 +177,22 @@ class CentrometalDataUpdateCoordinator(DataUpdateCoordinator):
             # Request status refresh via API
             await self.api.send_command({"REFRESH": 0})
 
-            # Return MQTT data if available, otherwise empty dict
-            # MQTT client will update data in real-time
-            if self.mqtt_client.data:
-                return self.mqtt_client.data
+            # Get PVAL parameters from portal (for number controls)
+            pval_data = await self.api.get_installation_status()
 
-            # If no MQTT data yet, return empty dict
-            # Data will be populated when MQTT messages arrive
-            return {}
+            # Merge MQTT data with PVAL data
+            combined_data = {}
+            if self.mqtt_client.data:
+                combined_data.update(self.mqtt_client.data)
+
+            # Add/update PVAL values from portal
+            if pval_data:
+                combined_data.update(pval_data)
+                _LOGGER.debug("Combined MQTT data (%d keys) with PVAL data (%d keys)",
+                             len(self.mqtt_client.data), len(pval_data))
+
+            return combined_data if combined_data else {}
+
         except Exception as err:
             _LOGGER.warning("Error communicating with API: %s", err)
             # Even if API fails, return MQTT data if available

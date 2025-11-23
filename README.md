@@ -67,11 +67,18 @@ Custom Home Assistant integration for Centrometal boilers with WiFi Box module. 
 - Configuration
 - Operation Mode
 
-### Climate Control
-- Climate entity for boiler control
-- Turn boiler ON/OFF
-- Shows current temperature
-- HVAC modes: OFF, HEAT
+### Control Features
+
+**Switches:**
+- 1st Heating Circuit (PWR 99) - ON/OFF control
+- 2nd Heating Circuit (PWR 129) - ON/OFF control
+
+**Number Controls:**
+- Boiler Temperature Setpoint (PWR 3) - 75-90°C
+- DHW (Domestic Hot Water) Temperature (PWR 10) - 40-80°C
+- Day Room Temperature 2nd Circuit (PWR 140) - 5-30°C
+
+All control values are automatically synchronized with portal
 
 ### Easy Configuration
 - Configuration via Home Assistant UI
@@ -136,48 +143,58 @@ All devices using Centrometal WiFi Box (ESP32-based) with MQTT connectivity are 
 4. Enter your credentials:
    - **Email:** Your portal.centrometal.hr login email
    - **Password:** Your portal password
-   - **Installation ID:** Your installation ID (see below)
+   - **Device ID:** Your WiFi Box device ID (see below)
 
-### Finding Your Installation ID
+### Finding Your Device ID
 
-Your Installation ID is required to identify your boiler on the portal.
+Your Device ID is the unique identifier of your WiFi Box (ESP32 module). This is required for MQTT communication.
 
-**Method 1: Browser Developer Tools**
+**Method 1: MQTT Monitoring (Recommended)**
+1. Install mosquitto-clients: `sudo apt-get install mosquitto-clients`
+2. Run this command and wait for your boiler to send data:
+   ```bash
+   mosquitto_sub -h 136.243.62.164 -p 1883 -u appuser -P appuser -t 'cm/inst/biotec/#' -v
+   ```
+3. You'll see messages like: `cm/inst/biotec/AD53C83A {"B_Tk1":68.3,...}`
+4. The Device ID is the part after `cm/inst/biotec/` (e.g., `AD53C83A`)
+
+**Method 2: Portal API (Advanced)**
 1. Login to https://portal.centrometal.hr
-2. Open Developer Tools (F12)
-3. Go to **Network** tab
-4. Refresh the page
-5. Find `/api/inst/list` request
-6. In the response, find your installation's `id` field
+2. Open Developer Tools (F12) → Network tab
+3. Refresh the page
+4. Find API requests to `/api/inst/list` or `/api/inst/status`
+5. In the response, look for `device_id` field
 
-Example response:
-```json
-[
-  {
-    "id": "1844",  ← This is your Installation ID
-    "name": "My Boiler",
-    "device_id": "AD53C83A",
-    ...
-  }
-]
-```
+**Method 3: WiFi Box Label**
+1. Check the WiFi Box module on your boiler
+2. The MAC address or device ID may be printed on a label
+3. It's usually 8 hexadecimal characters (e.g., AD53C83A)
 
-**Method 2: URL**
-1. Login to portal
-2. Look at the URL when viewing your boiler
-3. The ID is in the URL: `portal.centrometal.hr/installation/1844`
+**Method 4: Mobile App**
+1. If you use the Centrometal mobile app
+2. The device ID may be visible in device settings or details
 
 ## Entities
 
 After successful configuration, the integration creates the following entities:
 
-### Climate Entity
+### Switch Entities
 ```
-climate.centrometal_boiler_1844
+switch.centrometal_1st_heating_circuit    # PWR 99
+switch.centrometal_2nd_heating_circuit    # PWR 129
 ```
-- **Features:** Turn ON/OFF, view current temperature
-- **HVAC Modes:** OFF, HEAT
-- **Services:** `climate.turn_on`, `climate.turn_off`, `climate.set_hvac_mode`
+- **Features:** Turn heating circuits ON/OFF
+- **Services:** `switch.turn_on`, `switch.turn_off`, `switch.toggle`
+
+### Number Entities
+```
+number.centrometal_boiler_temperature                      # PWR 3 (75-90°C)
+number.centrometal_dhw_temperature                         # PWR 10 (40-80°C)
+number.centrometal_day_room_temperature_2nd_circuit        # PWR 140 (5-30°C)
+```
+- **Features:** Set temperature setpoints
+- **Services:** `number.set_value`
+- **Auto-sync:** Values automatically pulled from portal every minute
 
 ### Sensor Entities
 
@@ -215,14 +232,26 @@ All sensors follow the naming pattern: `sensor.centrometal_<name>`
 
 ### Lovelace Cards
 
-**Thermostat Card:**
+**Entities Card with Controls:**
 ```yaml
-type: thermostat
-entity: climate.centrometal_boiler_1844
-name: Centrometal Boiler
+type: entities
+title: Centrometal Boiler Control
+entities:
+  - entity: switch.centrometal_1st_heating_circuit
+    name: 1st Heating Circuit
+  - entity: switch.centrometal_2nd_heating_circuit
+    name: 2nd Heating Circuit
+  - type: section
+    label: Temperature Setpoints
+  - entity: number.centrometal_boiler_temperature
+    name: Boiler Temperature
+  - entity: number.centrometal_dhw_temperature
+    name: Hot Water Temperature
+  - entity: number.centrometal_day_room_temperature_2nd_circuit
+    name: Room Temperature (2nd Circuit)
 ```
 
-**Entities Card:**
+**Entities Card with Sensors:**
 ```yaml
 type: entities
 title: Centrometal Boiler
@@ -270,32 +299,61 @@ severity:
 
 ### Automations
 
-**Turn on boiler at 6 AM:**
+**Turn on heating circuit at 6 AM:**
 ```yaml
 automation:
-  - alias: "Boiler ON in morning"
+  - alias: "1st Heating Circuit ON in morning"
     trigger:
       platform: time
       at: "06:00:00"
     action:
-      service: climate.set_hvac_mode
+      service: switch.turn_on
       target:
-        entity_id: climate.centrometal_boiler_1844
-      data:
-        hvac_mode: heat
+        entity_id: switch.centrometal_1st_heating_circuit
 ```
 
-**Turn off boiler at 10 PM:**
+**Turn off heating circuit at 10 PM:**
 ```yaml
 automation:
-  - alias: "Boiler OFF at night"
+  - alias: "1st Heating Circuit OFF at night"
     trigger:
       platform: time
       at: "22:00:00"
     action:
-      service: climate.turn_off
+      service: switch.turn_off
       target:
-        entity_id: climate.centrometal_boiler_1844
+        entity_id: switch.centrometal_1st_heating_circuit
+```
+
+**Adjust boiler temperature based on outdoor temp:**
+```yaml
+automation:
+  - alias: "Adjust boiler temp for cold weather"
+    trigger:
+      platform: numeric_state
+      entity_id: sensor.centrometal_outdoor_temperature
+      below: 0
+    action:
+      service: number.set_value
+      target:
+        entity_id: number.centrometal_boiler_temperature
+      data:
+        value: 90
+```
+
+**Set DHW temperature in morning:**
+```yaml
+automation:
+  - alias: "Higher DHW temperature in morning"
+    trigger:
+      platform: time
+      at: "06:00:00"
+    action:
+      service: number.set_value
+      target:
+        entity_id: number.centrometal_dhw_temperature
+      data:
+        value: 60
 ```
 
 **Alert if oxygen level too high:**
@@ -351,7 +409,7 @@ The integration uses a hybrid approach:
 ```
 Home Assistant → Portal API → MQTT → WiFi Box → Boiler
 ```
-- Commands (ON/OFF, REFRESH) sent via Centrometal portal API
+- Commands (switches, number setpoints) sent via Centrometal portal API
 - Portal generates valid MQTT signatures
 - WiFi Box receives and executes commands
 
@@ -359,9 +417,17 @@ Home Assistant → Portal API → MQTT → WiFi Box → Boiler
 ```
 Boiler → WiFi Box → MQTT → Home Assistant
 ```
-- Real-time status via MQTT subscription
+- Real-time sensor status via MQTT subscription
 - No polling delay
-- All parameters updated instantly
+- All sensor parameters updated instantly
+
+### Parameters Sync (Portal API)
+```
+Portal API → Home Assistant (every 60 seconds)
+```
+- Number control values (PVAL_*) pulled from portal
+- Ensures setpoints are always synchronized
+- No more "unknown" states on startup
 
 ### Architecture Diagram
 ```
@@ -466,26 +532,15 @@ The integration supports multiple installations. Add each one separately:
 
 Each will create separate entities with unique IDs.
 
-### Custom Device ID
-
-By default, the integration uses a placeholder device ID. To use your specific device ID:
-
-Edit `/config/custom_components/centrometal/__init__.py` and update:
-```python
-self.device_id = "YOUR_DEVICE_ID"  # Replace with your actual device ID
-```
-
-Find your device ID from MQTT traffic or portal API response.
-
 ## Technical Details
 
 ### MQTT Topics
 
 **Device → Server (Status):**
 ```
-cm.inst.biotec.{DEVICE_ID}
+cm/inst/biotec/{DEVICE_ID}
 ```
-Example: `cm.inst.biotec.AD53C83A`
+Example: `cm/inst/biotec/AD53C83A`
 
 **Server → Device (Commands):**
 ```
@@ -526,20 +581,18 @@ Signatures (`_sign`) are generated by the portal API.
 
 ## Known Limitations
 
-1. **Device ID mapping:** Currently uses placeholder device ID
-2. **Internet required:** Requires connection to Centrometal portal and MQTT broker
-3. **Read-only counters:** Counter values are read-only
-4. **No temperature setpoint:** Only ON/OFF control (temperature setpoint control can be added)
+1. **Internet required:** Requires connection to Centrometal portal and MQTT broker
+2. **Read-only counters:** Counter values are read-only (cannot be reset)
+3. **Portal dependency:** All control commands require portal authentication
 
 ## Future Enhancements
 
 - [ ] Automatic device ID detection from portal
-- [ ] Temperature setpoint control (`PWR 3`)
-- [ ] Additional command support
-- [ ] Energy consumption tracking
+- [ ] Additional command support (more PWR parameters)
+- [ ] Energy consumption tracking and statistics
 - [ ] Historical data charts
 - [ ] Local MQTT broker support
-- [ ] Offline mode (local control)
+- [ ] Offline mode (local control without portal)
 
 ## Contributing
 

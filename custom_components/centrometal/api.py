@@ -4,7 +4,7 @@ import re
 import aiohttp
 import async_timeout
 
-from .const import LOGIN_PAGE, LOGIN_POST, API_CONTROL
+from .const import LOGIN_PAGE, LOGIN_POST, API_CONTROL, API_STATUS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,6 +121,50 @@ class CentrometalAPI:
     async def refresh_status(self) -> bool:
         """Request status refresh."""
         return await self.send_command({"REFRESH": 0})
+
+    async def get_installation_status(self) -> dict:
+        """Get installation status from portal (includes PVAL parameters)."""
+        if not self._logged_in:
+            if not await self.login():
+                return {}
+
+        try:
+            session = await self._get_session()
+            url = API_STATUS.format(install_id=self.install_id)
+
+            async with async_timeout.timeout(10):
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+
+                        # Extract PVAL_* values from params section
+                        pval_data = {}
+                        params = data.get("params", {})
+
+                        for key, value_obj in params.items():
+                            if key.startswith("PVAL_"):
+                                # Extract value from {"v": "90", "ut": "..."}
+                                if isinstance(value_obj, dict) and "v" in value_obj:
+                                    try:
+                                        # Convert to appropriate type (int or float)
+                                        val = value_obj["v"]
+                                        if isinstance(val, str):
+                                            # Try float first (handles both int and float)
+                                            pval_data[key] = float(val)
+                                        else:
+                                            pval_data[key] = val
+                                    except (ValueError, TypeError):
+                                        pval_data[key] = value_obj["v"]
+
+                        _LOGGER.debug("Retrieved %d PVAL parameters from portal", len(pval_data))
+                        return pval_data
+                    else:
+                        _LOGGER.error("Failed to get installation status: %d", resp.status)
+                        return {}
+
+        except Exception as err:
+            _LOGGER.error("Error getting installation status: %s", err)
+            return {}
 
     async def close(self):
         """Close the session."""

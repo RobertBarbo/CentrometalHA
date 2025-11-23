@@ -8,14 +8,14 @@ from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 
 from .api import CentrometalAPI
-from .const import DOMAIN, CONF_INSTALL_ID
+from .const import DOMAIN, CONF_DEVICE_ID, DEFAULT_INSTALL_ID
 
 _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema({
     vol.Required(CONF_EMAIL): cv.string,
     vol.Required(CONF_PASSWORD): cv.string,
-    vol.Required(CONF_INSTALL_ID, default="1844"): cv.string,
+    vol.Required(CONF_DEVICE_ID): cv.string,
 })
 
 
@@ -31,23 +31,28 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Try to login with provided credentials
+            # Use default install_id (same for all users)
             api = CentrometalAPI(
                 user_input[CONF_EMAIL],
                 user_input[CONF_PASSWORD],
-                user_input[CONF_INSTALL_ID]
+                DEFAULT_INSTALL_ID
             )
 
             try:
                 if await api.login():
                     await api.close()
 
-                    # Create unique ID from install_id
-                    await self.async_set_unique_id(user_input[CONF_INSTALL_ID])
+                    # Create unique ID from device_id
+                    await self.async_set_unique_id(user_input[CONF_DEVICE_ID])
                     self._abort_if_unique_id_configured()
 
+                    # Store device_id and install_id in config
+                    config_data = user_input.copy()
+                    config_data["install_id"] = DEFAULT_INSTALL_ID
+
                     return self.async_create_entry(
-                        title=f"Centrometal {user_input[CONF_INSTALL_ID]}",
-                        data=user_input
+                        title=f"Centrometal {user_input[CONF_DEVICE_ID]}",
+                        data=config_data
                     )
                 else:
                     errors["base"] = "auth"
